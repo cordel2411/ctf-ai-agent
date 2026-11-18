@@ -1,0 +1,9 @@
+challenge,student,solved,attempts,seconds
+Warmup: Base64,s01,1,1,95
+Warmup: Base64,s02,1,2,140
+Caesar's Visit,s01,1,3,310
+Caesar's Visit,s02,1,2,260
+Layers,s01,1,4,620
+Layers,s02,0,6,900
+Hex Is Just Bytes,s01,1,1,120
+Hex Is Just Bytes,s02,1,1,150
