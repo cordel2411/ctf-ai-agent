@@ -1,0 +1,34 @@
+name: ci
+on: [push, pull_request]
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -e ".[dev]"
+      - run: python -m pytest tests/test_unit.py -q
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install cfn-lint shellcheck-py
+      - run: cfn-lint infra/cloudformation.yaml
+      - run: shellcheck scripts/*.sh
+  integration:
+    # Real CTFd 3.8.9, scripted Bedrock model
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: |
+          git clone --depth 1 --branch 3.8.9 https://github.com/CTFd/CTFd.git ctfd
+          pip install -r ctfd/requirements.txt
+          pip install -e ".[dev]"
+          (cd ctfd && nohup python serve.py --port 4000 > ../ctfd.log 2>&1 &)
+          for i in $(seq 1 40); do curl -s -o /dev/null http://127.0.0.1:4000/setup && break; sleep 3; done
+          CTFD_TEST_URL=http://127.0.0.1:4000 python -m pytest tests/test_integration.py -q

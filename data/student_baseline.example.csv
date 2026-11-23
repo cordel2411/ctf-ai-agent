@@ -1,0 +1,7 @@
+challenge,student_median_seconds,student_mean_attempts,student_solve_rate
+Caesar's Salad,240,1.4,0.95
+Onion Layers,420,1.8,0.85
+One Byte Key,780,2.3,0.70
+Vigenere Vault,900,2.6,0.60
+Rail Fence,840,2.5,0.62
+Tiny RSA,1800,3.9,0.35

@@ -1,0 +1,28 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "InvokeClaudeOnBedrock",
+      "Effect": "Allow",
+      "Action": ["bedrock:InvokeModel", "bedrock:InvokeModelWithResponseStream"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "ListModels",
+      "Effect": "Allow",
+      "Action": [
+        "bedrock:ListFoundationModels",
+        "bedrock:GetFoundationModel",
+        "bedrock:ListInferenceProfiles",
+        "bedrock:GetInferenceProfile"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "FirstTimeAnthropicSubscription",
+      "Effect": "Allow",
+      "Action": ["aws-marketplace:ViewSubscriptions", "aws-marketplace:Subscribe"],
+      "Resource": "*"
+    }
+  ]
+}

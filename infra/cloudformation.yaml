@@ -1,0 +1,158 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: >
+  CTF AI Agent lab. One EC2 instance running CTFd (Docker) and the Bedrock agent.
+  The instance role grants Bedrock access (no API keys) and Session Manager (no SSH needed).
+  Uses the default VPC of the region.
+
+Parameters:
+  AllowedCidr:
+    Type: String
+    Description: >
+      Who may open CTFd in a browser (port 80). Use your public IP as x.x.x.x/32
+      (see https://checkip.amazonaws.com), or your school's range. 0.0.0.0/0 means the whole internet.
+    AllowedPattern: '^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$'
+    ConstraintDescription: Must look like 203.0.113.7/32
+  RepoUrl:
+    Type: String
+    Default: https://github.com/YOUR_GITHUB_USER/ctf-ai-agent.git
+    Description: HTTPS clone URL of this repository (must be public, or embed a read-only token).
+  RepoBranch:
+    Type: String
+    Default: main
+  BedrockModelId:
+    Type: String
+    Default: global.anthropic.claude-sonnet-5-5
+    Description: Bedrock model or inference-profile ID (change later in /opt/ctf-ai-agent/.env).
+  InstanceType:
+    Type: String
+    Default: m7i-flex.large
+    AllowedValues: [t3.small, m7i-flex.large, c7i-flex.large, t3.medium, t3.large]
+    Description: >
+      m7i-flex.large (8 GiB) is recommended and is allowed on the AWS Free plan. t3.small (2 GiB) also
+      works on the Free plan but is tight for CTFd + MariaDB + Redis + the Docker build.
+      t3.medium/t3.large are NOT allowed on the Free plan.
+  VolumeSize:
+    Type: Number
+    Default: 30
+    MinValue: 20
+    Description: Root disk size in GiB.
+  KeyName:
+    Type: String
+    Default: ''
+    Description: Optional EC2 key pair name. Leave empty to use Session Manager only (recommended).
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Conditions:
+  HasKey: !Not [!Equals [!Ref KeyName, '']]
+
+Resources:
+  InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal: { Service: ec2.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: BedrockAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: InvokeClaudeOnBedrock
+                Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource: '*'
+              - Sid: ListModels
+                Effect: Allow
+                Action:
+                  - bedrock:ListFoundationModels
+                  - bedrock:GetFoundationModel
+                  - bedrock:ListInferenceProfiles
+                  - bedrock:GetInferenceProfile
+                Resource: '*'
+              # Anthropic models are subscribed through AWS Marketplace on first use.
+              # You can delete this statement after the first successful call.
+              - Sid: FirstTimeAnthropicSubscription
+                Effect: Allow
+                Action: [aws-marketplace:ViewSubscriptions, aws-marketplace:Subscribe]
+                Resource: '*'
+
+  InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles: [!Ref InstanceRole]
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: CTFd web access
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: !Ref AllowedCidr
+          Description: CTFd web UI
+      Tags:
+        - { Key: Name, Value: ctf-ai-agent }
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref InstanceProfile
+      KeyName: !If [HasKey, !Ref KeyName, !Ref 'AWS::NoValue']
+      SecurityGroupIds: [!GetAtt SecurityGroup.GroupId]
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: !Ref VolumeSize
+            VolumeType: gp3
+            Encrypted: true
+      MetadataOptions:
+        HttpTokens: required
+        HttpPutResponseHopLimit: 2
+      Tags:
+        - { Key: Name, Value: ctf-ai-agent }
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euo pipefail
+          dnf install -y git
+          git clone --depth 1 --branch '${RepoBranch}' '${RepoUrl}' /opt/ctf-ai-agent
+          export REPO_URL='${RepoUrl}' BRANCH='${RepoBranch}' AWS_REGION='${AWS::Region}' BEDROCK_MODEL_ID='${BedrockModelId}'
+          bash /opt/ctf-ai-agent/scripts/bootstrap-ec2.sh
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - { Key: Name, Value: ctf-ai-agent }
+
+  ElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      InstanceId: !Ref Instance
+
+Outputs:
+  CtfdUrl:
+    Description: Open this in your browser once the install finishes (about 8-12 minutes after the stack is ready).
+    Value: !Sub 'http://${ElasticIp}'
+  InstanceId:
+    Value: !Ref Instance
+  ConnectInBrowser:
+    Description: Session Manager shell in the AWS console (no SSH or key pair needed).
+    Value: !Sub 'https://${AWS::Region}.console.aws.amazon.com/systems-manager/session-manager/${Instance}?region=${AWS::Region}'
+  ConnectWithCli:
+    Value: !Sub 'aws ssm start-session --target ${Instance} --region ${AWS::Region}'
+  InstallStatus:
+    Description: Run these in the session. Prints OK when the install is done.
+    Value: 'cat /opt/ctf-bootstrap-status ; tail -f /var/log/ctf-bootstrap.log'
